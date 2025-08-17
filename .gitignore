@@ -1,0 +1,114 @@
+# Root level .gitignore for End-App project
+
+# ========================
+# OS generated files
+# ========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ========================
+# IDE and Editor files
+# ========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ========================
+# Logs
+# ========================
+*.log
+logs/
+
+# ========================
+# Temporary files
+# ========================
+*.tmp
+*.temp
+
+# ========================
+# Environment files
+# ========================
+.env
+.env.local
+.env.production
+.env.development
+
+# ========================
+# Backup files
+# ========================
+*.bak
+*.backup
+
+# ========================
+# Archives
+# ========================
+*.zip
+*.tar.gz
+*.rar
+
+# ========================
+# Project specific
+# ========================
+# Large model/data files
+*.pkl
+*.h5
+*.model
+*.weights
+*.bin
+
+# ========================
+# Node.js (Frontend)
+# ========================
+frontend/node_modules/
+node_modules/
+
+# ========================
+# Python (Backend)
+# ========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+*.whl
+.eggs/
+build/
+dist/
+
+# Ignore virtual environments
+venv/
+backend/venv/
+
+# ========================
+# Coverage / Test
+# ========================
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# ========================
+# Local config / secrets
+# ========================
+config_local.py
+local_config.py
+*.db
+*.sqlite
+*.sqlite3
+
+# ========================
+# Docker
+# ========================
+.dockerignore
+
+# ========================
+# Git internals (safety)
+# ========================
+.git/

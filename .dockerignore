@@ -1,0 +1,17 @@
+# Ignore virtual environments
+venv/
+.env
+
+# Ignore git
+.git
+.gitignore
+
+# Ignore node modules
+node_modules/
+
+# Ignore big model files if not needed
+*.pt
+*.pth
+
+# Ignore frontend
+frontend/

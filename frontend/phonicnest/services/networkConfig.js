@@ -7,17 +7,28 @@ const ENVIRONMENTS = {
   LOCAL_NETWORK: 'local_network',
 };
 
-// Get your computer's IP address for local network testing
+// Try to auto-detect your computer's LAN IP from Expo, fallback to manual IP
 const getLocalIP = () => {
-  // You can find your IP address by running 'ipconfig' in Windows Command Prompt
-  // Look for "IPv4 Address" under your active network adapter
-  return '10.7.40.30'; // Your actual IP address
+  try {
+    // Lazy require to avoid hard dependency in non-Expo contexts
+    const Constants = require('expo-constants').default;
+    const hostUri = (Constants?.expoConfig?.hostUri) || (Constants?.manifest?.hostUri) || '';
+    // Examples: "192.168.1.50:19000", "10.7.40.174:19000"
+    const match = /^(\d+\.\d+\.\d+\.\d+):\d+$/.exec(hostUri || '');
+    if (match && match[1]) {
+      return match[1];
+    }
+  } catch (e) {
+    // Ignore and use manual fallback
+  }
+  // Manual fallback: replace with your actual IPv4 from 'ipconfig'
+  return '10.7.42.159';
 };
 
 // Configuration for different environments
 const config = {
   [ENVIRONMENTS.DEVELOPMENT]: {
-    API_BASE_URL: 'http://10.7.40.30:8000',
+    API_BASE_URL: 'http://localhost:8000',
     TIMEOUT: 30000,
   },
   [ENVIRONMENTS.LOCAL_NETWORK]: {

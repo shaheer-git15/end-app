@@ -6,10 +6,11 @@ import SplashScreen from '../screens/SplashScreen';
 import WelcomeScreen from '../screens/WelcomeScreen';
 import SignUpScreen from '../screens/SignUpScreen';
 import LoginScreen from '../screens/LoginScreen';
-
-import RecoveryPasswordScreen from '../screens/RecoveryPasswordScreen';
 import LoginSuccessScreen from '../screens/LoginSuccessScreen';
 import SignUpSuccessScreen from '../screens/SignUpSuccessScreen';
+import RolesScreen from '../screens/RolesScreen';
+import AdminDashboard from '../screens/AdminDashboard';
+import InstructorDashboard from '../screens/InstructorDashboard';
 import StudentDashboard from '../screens/StudentDashboard';
 import StudentDashboard2 from '../screens/StudentDashboard2';
 import ProfileScreen from '../screens/ProfileScreen';
@@ -58,14 +59,6 @@ const AppNavigator = () => {
             headerShown: false,
           }}
         />
-
-        <Stack.Screen
-          name="RecoveryPassword"
-          component={RecoveryPasswordScreen}
-          options={{
-            headerShown: false,
-          }}
-        />
         <Stack.Screen
           name="LoginSuccess"
           component={LoginSuccessScreen}
@@ -76,6 +69,27 @@ const AppNavigator = () => {
         <Stack.Screen
           name="SignUpSuccess"
           component={SignUpSuccessScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="Roles"
+          component={RolesScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="AdminDashboard"
+          component={AdminDashboard}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="InstructorDashboard"
+          component={InstructorDashboard}
           options={{
             headerShown: false,
           }}

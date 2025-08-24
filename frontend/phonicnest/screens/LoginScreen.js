@@ -71,6 +71,7 @@ const LoginScreen = ({ navigation }) => {
           />
         </View>
 
+
         {/* Login Button */}
         <TouchableOpacity 
           style={[styles.loginButton, loading && styles.loginButtonDisabled]} 
@@ -165,6 +166,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#2D479D',
     color: '#000',
+  },
+  forgotPasswordLink: {
+    alignSelf: 'flex-end',
+    marginBottom: 15,
+  },
+  forgotPasswordText: {
+    fontSize: 14,
+    color: '#2D479D',
+    fontWeight: '500',
+    textDecorationLine: 'underline',
   },
   loginButton: {
     backgroundColor: '#4A70E2',

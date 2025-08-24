@@ -13,6 +13,7 @@ import {
   orderBy,
   getDocs,
   serverTimestamp,
+  Timestamp,
   deleteDoc
 } from 'firebase/firestore';
 
@@ -49,7 +50,8 @@ export const userService = {
         phonemesCompleted: [],
         progressHistory: [], // Array to store last 30 attempts
         currentStreak: 0,
-        bestScore: 0
+        bestScore: 0,
+        bestVideoScore: 0
       };
 
       await setDoc(doc(db, 'users', userId), userData);
@@ -90,37 +92,26 @@ export const userService = {
   },
 
   // Check if user exists, if not create new user
-  async ensureUser(email, displayName = '') {
-    try {
-      let user = await this.getUser(email);
-      if (!user) {
-        const result = await this.createUser(email, displayName);
-        user = result.user;
-      } else {
-        await this.updateLastLogin(email);
-      }
-      return user;
-    } catch (error) {
-      console.error('Ensure user error:', error);
-      throw error;
-    }
-  }
+  // No auto-create on sign-in; sign-up explicitly creates
 };
 
 // Progress Services with 30-try limit
 export const progressService = {
-  async saveAttempt(email, phoneme, audioScore, videoScore, audioMostLikely = null, videoMostLikely = null) {
+  async saveAttempt(email, phoneme, audioScore, videoScore, audioTopMatch = null, videoTopMatch = null, isCorrect = true, mismatchMessage = null, detectedPhoneme = null) {
     try {
       const userId = email;
       const attemptData = {
         userId,
         phoneme,
-        audioScore,
-        videoScore,
-        audioMostLikely,
-        videoMostLikely,
+        audioScore: Number(audioScore),
+        videoScore: Number(videoScore),
+        audioTopMatch,
+        videoTopMatch,
+        isCorrect,
+        mismatchMessage,
+        detectedPhoneme,
         timestamp: serverTimestamp(),
-        combinedScore: Math.round((audioScore + videoScore) / 2)
+        combinedScore: Math.round((Number(audioScore) + Number(videoScore)) / 2)
       };
 
       // Save attempt to attempts collection
@@ -147,10 +138,16 @@ export const progressService = {
         progressHistory.push({
           attemptId: attemptRef.id,
           phoneme,
-          audioScore,
-          videoScore,
+          audioScore: Number(audioScore),
+          videoScore: Number(videoScore),
           combinedScore: attemptData.combinedScore,
-          timestamp: serverTimestamp()
+          isCorrect,
+          mismatchMessage,
+          detectedPhoneme,
+          audioTopMatch,
+          videoTopMatch,
+          // serverTimestamp() is not allowed inside arrays; use client Timestamp
+          timestamp: Timestamp.now()
         });
 
         // Keep only last 30 attempts
@@ -158,9 +155,10 @@ export const progressService = {
           progressHistory.splice(0, progressHistory.length - 30);
         }
 
-        // Calculate current streak and best score
+        // Calculate current streak and best scores
         const currentStreak = this.calculateStreak(progressHistory);
         const bestScore = Math.max(userData.bestScore || 0, attemptData.combinedScore);
+        const bestVideoScore = Math.max(userData.bestVideoScore || 0, Number(videoScore));
 
         await updateDoc(userRef, {
           totalAttempts: newTotalAttempts,
@@ -170,6 +168,7 @@ export const progressService = {
           progressHistory,
           currentStreak,
           bestScore,
+          bestVideoScore,
           lastAttempt: serverTimestamp()
         });
       }
@@ -212,16 +211,22 @@ export const progressService = {
   async getUserAttempts(email, limit = 30) {
     try {
       const userId = email;
+      // Avoid composite index by querying on userId only and sorting client-side
       const attemptsQuery = query(
         collection(db, 'attempts'),
-        where('userId', '==', userId),
-        orderBy('timestamp', 'desc')
+        where('userId', '==', userId)
       );
 
       const querySnapshot = await getDocs(attemptsQuery);
       const attempts = [];
-      querySnapshot.forEach((doc) => {
-        attempts.push({ id: doc.id, ...doc.data() });
+      querySnapshot.forEach((d) => {
+        attempts.push({ id: d.id, ...d.data() });
+      });
+
+      attempts.sort((a, b) => {
+        const ta = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+        const tb = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+        return tb - ta; // newest first
       });
 
       return attempts.slice(0, limit);
@@ -234,20 +239,26 @@ export const progressService = {
   async getPhonemeProgress(email, phoneme) {
     try {
       const userId = email;
+      // Avoid composite index; filter client-side
       const attemptsQuery = query(
         collection(db, 'attempts'),
-        where('userId', '==', userId),
-        where('phoneme', '==', phoneme),
-        orderBy('timestamp', 'desc')
+        where('userId', '==', userId)
       );
 
       const querySnapshot = await getDocs(attemptsQuery);
       const attempts = [];
-      querySnapshot.forEach((doc) => {
-        attempts.push({ id: doc.id, ...doc.data() });
+      querySnapshot.forEach((d) => {
+        attempts.push({ id: d.id, ...d.data() });
       });
 
-      return attempts;
+      const filtered = attempts
+        .filter((a) => a.phoneme === phoneme)
+        .sort((a, b) => {
+          const ta = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+          const tb = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+          return tb - ta;
+        });
+      return filtered;
     } catch (error) {
       console.error('Get phoneme progress error:', error);
       throw error;

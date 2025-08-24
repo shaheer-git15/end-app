@@ -65,6 +65,14 @@ const TasksScreen = ({ navigation }) => {
     navigation.navigate('StudentDashboard');
   };
 
+  const handleAddTask = () => {
+    alert('Will be available in future version');
+  };
+
+  const handleTaskPress = (task) => {
+    alert('Will be available in future version');
+  };
+
   const getPriorityColor = (priority) => {
     switch (priority) {
       case 'High':
@@ -92,7 +100,10 @@ const TasksScreen = ({ navigation }) => {
   };
 
   const renderTaskItem = ({ item }) => (
-    <View style={styles.taskCard}>
+    <TouchableOpacity 
+      style={styles.taskCard}
+      onPress={() => handleTaskPress(item)}
+    >
       <View style={styles.taskHeader}>
         <View style={styles.subjectTag}>
           <Text style={styles.subjectText}>{item.subject}</Text>
@@ -114,7 +125,7 @@ const TasksScreen = ({ navigation }) => {
           <Text style={styles.statusText}>{item.status}</Text>
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   return (
@@ -132,40 +143,22 @@ const TasksScreen = ({ navigation }) => {
         <Text style={styles.headerTitle}>Tasks</Text>
 
         {/* Right - Add Button */}
-        <TouchableOpacity style={styles.addButton}>
+        <TouchableOpacity style={styles.addButton} onPress={handleAddTask}>
           <Text style={styles.addIcon}>+</Text>
         </TouchableOpacity>
       </View>
 
       {/* Tasks Content */}
       <View style={styles.content}>
-        {/* Task Statistics */}
-        <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{tasks.length}</Text>
-            <Text style={styles.statLabel}>Total Tasks</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{tasks.filter(t => t.status === 'Completed').length}</Text>
-            <Text style={styles.statLabel}>Completed</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{tasks.filter(t => t.status === 'Pending').length}</Text>
-            <Text style={styles.statLabel}>Pending</Text>
-          </View>
-        </View>
+        <FlatList
+          data={tasks}
+          renderItem={renderTaskItem}
+          keyExtractor={(item) => item.id}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.tasksList}
+        />
 
-        {/* Tasks List */}
-        <View style={styles.tasksSection}>
-          <Text style={styles.sectionTitle}>My Tasks</Text>
-          <FlatList
-            data={tasks}
-            renderItem={renderTaskItem}
-            keyExtractor={(item) => item.id}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.tasksList}
-          />
-        </View>
+        {/* Empty list for now */}
       </View>
     </SafeAreaView>
   );

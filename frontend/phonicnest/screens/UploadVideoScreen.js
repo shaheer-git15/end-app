@@ -9,6 +9,7 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 import * as DocumentPicker from 'expo-document-picker';
 import apiService from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -16,12 +17,61 @@ import { progressService } from '../services/firebase';
 
 const { width, height } = Dimensions.get('window');
 
+const CircularProgress = ({ size = 80, strokeWidth = 8, percent = 0, color = '#2D479D', label = '' }) => {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.max(0, Math.min(100, percent));
+  const dashOffset = circumference * (1 - clamped / 100);
+
+  return (
+    <View style={{ 
+      width: size, 
+      height: size + 30, // Extra height for label
+      justifyContent: 'flex-start', 
+      alignItems: 'center' 
+    }}>
+      <Svg width={size} height={size}>
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke="#F0F0F0"
+          strokeWidth={strokeWidth}
+          fill="none"
+        />
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={color}
+          strokeWidth={strokeWidth}
+          fill="none"
+          strokeDasharray={`${circumference} ${circumference}`}
+          strokeDashoffset={dashOffset}
+          strokeLinecap="round"
+          rotation={-90}
+          origin={`${size / 2}, ${size / 2}`}
+        />
+      </Svg>
+      <View style={styles.progressRingCenterFix}>
+        <Text style={styles.progressPercentage}>{clamped}%</Text>
+      </View>
+      {label && (
+        <Text style={[styles.progressLabel, { marginTop: 10 }]}>
+          {label}
+        </Text>
+      )}
+    </View>
+  );
+};
+
 const UploadVideoScreen = ({ navigation }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [selectedPhoneme, setSelectedPhoneme] = useState('');
   const [backendConnected, setBackendConnected] = useState(false);
   const [gradingResult, setGradingResult] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
   
   const { user } = useAuth();
 
@@ -64,6 +114,7 @@ const UploadVideoScreen = ({ navigation }) => {
 
       const file = result.assets[0];
       setSelectedVideo(file);
+      setGradingResult(null); // Clear previous results
       console.log('Selected video:', file);
     } catch (error) {
       console.error('Error picking video:', error);
@@ -75,6 +126,21 @@ const UploadVideoScreen = ({ navigation }) => {
     setSelectedVideo(null);
     setSelectedPhoneme('');
     setGradingResult(null);
+    setUploadProgress(0);
+  };
+
+  const simulateProgress = () => {
+    setUploadProgress(0);
+    const interval = setInterval(() => {
+      setUploadProgress(prev => {
+        if (prev >= 90) {
+          clearInterval(interval);
+          return 90;
+        }
+        return prev + 10;
+      });
+    }, 200);
+    return interval;
   };
 
   const handleUploadVideo = async () => {
@@ -88,12 +154,21 @@ const UploadVideoScreen = ({ navigation }) => {
       return;
     }
 
-    if (!backendConnected) {
-      Alert.alert('Error', 'Backend server is not connected. Please try again.');
+    // Re-check backend connection just before uploading
+    try {
+      const connectedNow = await apiService.testConnection();
+      setBackendConnected(connectedNow);
+      if (!connectedNow) {
+        Alert.alert('Error', 'Backend server is not connected. Please make sure it is running and reachable on your network.');
+        return;
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Failed to verify backend connection.');
       return;
     }
 
     setIsUploading(true);
+    const progressInterval = simulateProgress();
 
     try {
       // Create file object for upload
@@ -109,6 +184,9 @@ const UploadVideoScreen = ({ navigation }) => {
       // Send to backend for analysis
       const result = await apiService.gradePronunciation(videoFile, selectedPhoneme);
       
+      clearInterval(progressInterval);
+      setUploadProgress(100);
+      
       setGradingResult(result);
       
       // Save progress to Firebase if user is logged in
@@ -116,11 +194,14 @@ const UploadVideoScreen = ({ navigation }) => {
         try {
           await progressService.saveAttempt(
             user.email,
-            selectedPhoneme,
+            result.user_phoneme,
             result.audio_score,
             result.video_score,
-            result.audio_most_likely || null,
-            result.video_most_likely || null
+            result.audio_top_match || null,
+            result.video_top_match || null,
+            result.is_correct,
+            result.mismatch_message || null,
+            result.detected_phoneme || null
           );
         } catch (error) {
           console.error('Failed to save progress:', error);
@@ -129,41 +210,26 @@ const UploadVideoScreen = ({ navigation }) => {
       
       setIsUploading(false);
       
-      // Show results with detailed feedback
-      const resultMessage = `Audio Score: ${result.audio_score}%\nVideo Score: ${result.video_score}%\n\n${
-        result.audio_most_likely ? `Audio suggests: "${result.audio_most_likely}"\n` : ''
-      }${
-        result.video_most_likely ? `Video suggests: "${result.video_most_likely}"\n` : ''
-      }`;
-      
-      Alert.alert(
-        'Analysis Complete',
-        resultMessage,
-        [
-          {
-            text: 'View Progress',
-            onPress: () => navigation.navigate('ProgressScreen'),
-          },
-          {
-            text: 'Try Again',
-            onPress: () => {
-              setGradingResult(null);
-              setSelectedVideo(null);
-              setSelectedPhoneme('');
-            },
-          },
-        ]
-      );
     } catch (error) {
+      clearInterval(progressInterval);
       setIsUploading(false);
+      setUploadProgress(0);
       console.error('Upload failed:', error);
       Alert.alert('Error', 'Failed to analyze video. Please try again.');
     }
   };
 
   const phonemes = [
-    'ai', 'y', 'z', 'th', 'sh', 'ch', 'ng', 'ee', 'oo', 'ar', 'er', 'or'
+    'ai', 'y', 'z','g', 's', 'c/k', 'qu'
   ];
+
+  const getScoreColor = (score) => {
+    if (score >= 80) return '#4CAF50';  // Green for excellent
+    if (score >= 60) return '#FF9800';  // Orange for good
+    if (score >= 40) return '#FFC107';  // Yellow for fair
+    if (score >= 20) return '#FF5722';  // Red-orange for poor
+    return '#F44336';  // Red for very poor
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -186,7 +252,7 @@ const UploadVideoScreen = ({ navigation }) => {
           disabled={isUploading}
         >
           <Text style={styles.uploadButtonText}>
-            {isUploading ? 'Uploading...' : 'Upload'}
+            {isUploading ? 'Analyzing...' : 'Upload'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -254,9 +320,90 @@ const UploadVideoScreen = ({ navigation }) => {
             <View style={styles.formCard}>
               <Text style={styles.cardTitle}>Analysis Progress</Text>
               <View style={styles.progressBar}>
-                <View style={styles.progressFill} />
+                <View style={[styles.progressFill, { width: `${uploadProgress}%` }]} />
               </View>
-              <Text style={styles.progressText}>Analyzing pronunciation... Please wait</Text>
+              <Text style={styles.progressText}>
+                {uploadProgress < 30 && 'Extracting audio and video...'}
+                {uploadProgress >= 30 && uploadProgress < 60 && 'Analyzing pronunciation...'}
+                {uploadProgress >= 60 && uploadProgress < 90 && 'Processing results...'}
+                {uploadProgress >= 90 && 'Finalizing analysis...'}
+              </Text>
+            </View>
+          )}
+
+          {/* Results Section */}
+          {gradingResult && !isUploading && (
+            <View style={styles.formCard}>
+              <Text style={styles.cardTitle}>Analysis Results</Text>
+              
+              {/* Selected Phoneme */}
+              <View style={styles.resultRow}>
+                <Text style={styles.resultLabel}>Selected Phoneme:</Text>
+                <Text style={styles.resultValue}>{gradingResult.user_phoneme}</Text>
+              </View>
+
+              {/* Mismatch Message */}
+              {gradingResult.mismatch_message && (
+                <View style={styles.mismatchContainer}>
+                  <Text style={styles.mismatchText}>{gradingResult.mismatch_message}</Text>
+                </View>
+              )}
+
+              {/* Progress Circles */}
+              <View style={styles.progressCirclesContainer}>
+                <CircularProgress 
+                  size={80} 
+                  strokeWidth={8} 
+                  percent={gradingResult.audio_score} 
+                  color={getScoreColor(gradingResult.audio_score)}
+                  label="Audio"
+                />
+                <CircularProgress 
+                  size={80} 
+                  strokeWidth={8} 
+                  percent={gradingResult.video_score} 
+                  color={getScoreColor(gradingResult.video_score)}
+                  label="Video"
+                />
+              </View>
+
+              {/* Top Matches */}
+              {(gradingResult.audio_top_match || gradingResult.video_top_match) && (
+                <View style={styles.topMatchesContainer}>
+                  <Text style={styles.topMatchesTitle}>Best Matches:</Text>
+                  {gradingResult.audio_top_match && (
+                    <Text style={styles.topMatchText}>
+                      Audio: {gradingResult.audio_top_match}
+                    </Text>
+                  )}
+                  {gradingResult.video_top_match && (
+                    <Text style={styles.topMatchText}>
+                      Video: {gradingResult.video_top_match}
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/* Action Buttons */}
+              <View style={styles.resultActions}>
+                <TouchableOpacity 
+                  style={styles.viewProgressButton}
+                  onPress={() => navigation.navigate('Progress')}
+                >
+                  <Text style={styles.viewProgressButtonText}>View Progress</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.tryAgainButton}
+                  onPress={() => {
+                    setGradingResult(null);
+                    setSelectedVideo(null);
+                    setSelectedPhoneme('');
+                    setUploadProgress(0);
+                  }}
+                >
+                  <Text style={styles.tryAgainButtonText}>Try Again</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
         </View>
@@ -430,7 +577,6 @@ const styles = StyleSheet.create({
   progressFill: {
     height: '100%',
     backgroundColor: '#2D479D',
-    width: '60%',
     borderRadius: 4,
   },
   progressText: {
@@ -443,6 +589,133 @@ const styles = StyleSheet.create({
     color: '#999',
     marginTop: 5,
   },
+  // New styles for results
+  resultRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+    paddingVertical: 8,
+    backgroundColor: '#F8F9FA',
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  resultLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  resultValue: {
+    fontSize: 16,
+    color: '#2D479D',
+    fontWeight: 'bold',
+  },
+  mismatchContainer: {
+    backgroundColor: '#FFF3CD',
+    borderColor: '#FFEAA7',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 20,
+  },
+  mismatchText: {
+    fontSize: 14,
+    color: '#856404',
+    textAlign: 'center',
+  },
+  progressCirclesContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginVertical: 20,
+    alignItems: 'flex-start',
+    minHeight: 120,
+    paddingHorizontal: 20,
+  },
+  progressRingCenterFix: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: 'white',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+    zIndex: 2,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+  },
+  progressPercentage: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#2D479D',
+    textAlign: 'center',
+  },
+  progressLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 8,
+    textAlign: 'center',
+    fontWeight: '500',
+    width: '100%',
+  },
+  topMatchesContainer: {
+    backgroundColor: '#E3F2FD',
+    borderColor: '#BBDEFB',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 20,
+  },
+  topMatchesTitle: {
+    fontSize: 14,
+    color: '#1976D2',
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  topMatchText: {
+    fontSize: 13,
+    color: '#1976D2',
+    marginBottom: 4,
+  },
+  resultActions: {
+    flexDirection: 'row',
+    gap: 15,
+    marginTop: 10,
+  },
+  viewProgressButton: {
+    flex: 1,
+    backgroundColor: '#2D479D',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  viewProgressButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  tryAgainButton: {
+    flex: 1,
+    backgroundColor: '#6C757D',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  tryAgainButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
 });
 
 export default UploadVideoScreen;
+

@@ -1,66 +1,71 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Dimensions,
-  SafeAreaView,
-  TouchableOpacity,
-  ScrollView,
-  FlatList,
-} from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, Dimensions, SafeAreaView, TouchableOpacity, ScrollView } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
+import { useAuth } from '../contexts/AuthContext';
+import { progressService } from '../services/firebase';
 
 const { width, height } = Dimensions.get('window');
 
+const CircularProgress = ({ size = 100, strokeWidth = 10, percent = 0, color = '#2D479D' }) => {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.max(0, Math.min(100, percent));
+  const dashOffset = circumference * (1 - clamped / 100);
+
+  return (
+    <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
+      <Svg width={size} height={size}>
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke="#F0F0F0"
+          strokeWidth={strokeWidth}
+          fill="none"
+        />
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={color}
+          strokeWidth={strokeWidth}
+          fill="none"
+          strokeDasharray={`${circumference} ${circumference}`}
+          strokeDashoffset={dashOffset}
+          strokeLinecap="round"
+          rotation={-90}
+          origin={`${size / 2}, ${size / 2}`}
+        />
+      </Svg>
+      <View style={styles.progressRingCenterFix}>
+        <Text style={styles.progressPercentage}>{clamped}%</Text>
+      </View>
+    </View>
+  );
+};
+
 const ProgressScreen = ({ navigation }) => {
-  const [progressData] = useState({
-    overallGPA: 3.8,
-    semesterGPA: 3.9,
-    totalCredits: 75,
-    completedCredits: 60,
-    courses: [
-      {
-        id: '1',
-        name: 'Advanced Mathematics',
-        grade: 'A',
-        credits: 4,
-        score: 92,
-        status: 'Completed',
-      },
-      {
-        id: '2',
-        name: 'Computer Science Fundamentals',
-        grade: 'A-',
-        credits: 3,
-        score: 88,
-        status: 'Completed',
-      },
-      {
-        id: '3',
-        name: 'Literature & Composition',
-        grade: 'B+',
-        credits: 3,
-        score: 87,
-        status: 'Completed',
-      },
-      {
-        id: '4',
-        name: 'Physics I',
-        grade: 'A',
-        credits: 4,
-        score: 91,
-        status: 'In Progress',
-      },
-      {
-        id: '5',
-        name: 'History of Art',
-        grade: 'B',
-        credits: 3,
-        score: 85,
-        status: 'In Progress',
-      },
-    ],
-  });
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [userStats, setUserStats] = useState(null);
+  const [attempts, setAttempts] = useState([]);
+
+  useEffect(() => {
+    const fetchProgress = async () => {
+      try {
+        if (!user?.email) return;
+        const stats = await progressService.getUserProgress(user.email);
+        const recentAttempts = await progressService.getUserAttempts(user.email, 30);
+        setUserStats(stats);
+        setAttempts(recentAttempts);
+      } catch (e) {
+        console.error('Failed to load progress:', e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchProgress();
+  }, [user?.email]);
 
   const handleBackPress = () => {
     navigation.navigate('StudentDashboard');
@@ -128,7 +133,18 @@ const ProgressScreen = ({ navigation }) => {
     </View>
   );
 
-  const progressPercentage = (progressData.completedCredits / progressData.totalCredits) * 100;
+  const averageScore = useMemo(() => Number.isFinite(userStats?.averageScore) ? userStats.averageScore : 0, [userStats]);
+  
+  // Calculate averages from the last 5 attempts
+  const last5Attempts = attempts.slice(0, 5);
+  const audioScores = last5Attempts.map(a => Number(a.audioScore) || 0);
+  const videoScores = last5Attempts.map(a => Number(a.videoScore) || 0);
+  
+  const averageAudioScore = audioScores.length > 0 ? Math.round(audioScores.reduce((sum, score) => sum + score, 0) / audioScores.length) : 0;
+  const averageVideoScore = videoScores.length > 0 ? Math.round(videoScores.reduce((sum, score) => sum + score, 0) / videoScores.length) : 0;
+  
+  const phonicsPercent = Math.max(0, Math.min(100, averageAudioScore));
+  const gesturesPercent = Math.max(0, Math.min(100, averageVideoScore));
 
   return (
     <SafeAreaView style={styles.container}>
@@ -159,12 +175,7 @@ const ProgressScreen = ({ navigation }) => {
             {/* Phonics Progress Ring */}
             <View style={styles.skillCard}>
               <View style={styles.progressRingContainer}>
-                <View style={styles.progressRingNoBg}>
-                  <View style={[styles.phonicsProgressRingFill, { transform: [{ rotate: `${(75 / 100) * 360}deg` }] }]} />
-                  <View style={styles.progressRingCenterFix}>
-                    <Text style={styles.progressPercentage}>75%</Text>
-                  </View>
-                </View>
+                <CircularProgress size={100} strokeWidth={10} percent={phonicsPercent} color="#2D479D" />
               </View>
               <Text style={styles.skillLabel}>Phonics</Text>
             </View>
@@ -172,12 +183,7 @@ const ProgressScreen = ({ navigation }) => {
             {/* Gestures Progress Ring */}
             <View style={styles.skillCard}>
               <View style={styles.progressRingContainer}>
-                <View style={styles.progressRingNoBg}>
-                  <View style={[styles.gesturesProgressRingFill, { transform: [{ rotate: `${(60 / 100) * 360}deg` }] }]} />
-                  <View style={styles.progressRingCenterFix}>
-                    <Text style={styles.progressPercentage}>60%</Text>
-                  </View>
-                </View>
+                <CircularProgress size={100} strokeWidth={10} percent={gesturesPercent} color="#1E88E5" />
               </View>
               <Text style={styles.skillLabel}>Gestures</Text>
             </View>
@@ -189,26 +195,47 @@ const ProgressScreen = ({ navigation }) => {
           <View style={styles.recentActivityCard}>
             <Text style={styles.recentActivityTitle}>Recent Activity</Text>
             <View style={styles.activityList}>
-              <View style={styles.activityItem}>
-                <Text style={styles.activityText}>Practiced Phonics: A, B, C</Text>
-                <Text style={styles.activityDate}>13 July</Text>
-              </View>
-              <View style={styles.activityItem}>
-                <Text style={styles.activityText}>Practiced Phonics: A, E, I</Text>
-                <Text style={styles.activityDate}>14 July</Text>
-              </View>
-              <View style={styles.activityItem}>
-                <Text style={styles.activityText}>Practiced Phonics: L, U, S</Text>
-                <Text style={styles.activityDate}>15 July</Text>
-              </View>
-              <View style={styles.activityItem}>
-                <Text style={styles.activityText}>Completed sound quiz: A–D</Text>
-                <Text style={styles.activityDate}>16 July</Text>
-              </View>
-              <View style={styles.activityItem}>
-                <Text style={styles.activityText}>Practiced Phonics: J, H, O</Text>
-                <Text style={styles.activityDate}>17 July</Text>
-              </View>
+              {(attempts && attempts.length > 0) ? (
+                attempts.slice(0, 5).map((a) => {
+                  const dateStr = a.timestamp?.toDate ? a.timestamp.toDate().toLocaleDateString() : '';
+                  return (
+                    <TouchableOpacity
+                      key={a.id}
+                      style={styles.activityItem}
+                                             onPress={() => {
+                         // Show complete attempt details
+                         let attemptDetails = `Attempt on ${dateStr}\nPhoneme: ${a.phoneme}\nAudio: ${a.audioScore}%\nVideo: ${a.videoScore}%\nCombined: ${a.combinedScore}%`;
+                         
+                         // Add mismatch info if available
+                         if (a.mismatchMessage) {
+                           attemptDetails += `\n\n${a.mismatchMessage}`;
+                         }
+                         
+                         // Add top matches if available
+                         if (a.audioTopMatch && a.audioScore < 50) {
+                           attemptDetails += `\nAudio top match: ${a.audioTopMatch}`;
+                         }
+                         
+                         if (a.videoTopMatch && a.videoScore < 50) {
+                           attemptDetails += `\nVideo top match: ${a.videoTopMatch}`;
+                         }
+                         
+                         // Add detected phoneme if different
+                         if (a.detectedPhoneme && a.detectedPhoneme !== a.phoneme) {
+                           attemptDetails += `\n\nSystem detected: ${a.detectedPhoneme}`;
+                         }
+                         
+                         alert(attemptDetails);
+                       }}
+                    >
+                      <Text style={styles.activityText}>Practiced Phoneme: {a.phoneme} — Score {a.combinedScore}%</Text>
+                      <Text style={styles.activityDate}>{dateStr}</Text>
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
+                <Text style={{ textAlign: 'center', color: '#666' }}>No recent activity yet</Text>
+              )}
             </View>
           </View>
         </View>

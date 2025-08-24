@@ -1,266 +1,208 @@
-# from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-# from fastapi.middleware.cors import CORSMiddleware
-# import traceback
-
-# # Import updated utils
-# from utils.audio_utils import analyze_audio
-# from utils.video_utils import process_video
-
-# app = FastAPI(title="Phonics Backend", version="2.0.0")
-
-# # CORS (currently open; restrict in production)
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
-# @app.get("/health")
-# def health():
-#     return {"status": "ok"}
-
-# @app.post("/grade")
-# async def grade_pronunciation(
-#     video: UploadFile = File(...),
-#     phoneme: str = Form(...),
-# ):
-#     """
-#     Accepts:
-#     - video: file (mp4/mov)
-#     - phoneme: e.g., "ai", "y", "z"
-    
-#     Returns:
-#     {
-#         "selected_phoneme": "y",
-#         "audio_score": 42,
-#         "audio_most_likely": "z",
-#         "video_score": 75
-#     }
-#     """
-#     if not phoneme or not phoneme.strip():
-#         raise HTTPException(status_code=400, detail="Missing 'phoneme'.")
-
-#     # Read the uploaded file into memory
-#     try:
-#         video_bytes = await video.read()
-#         if not video_bytes:
-#             raise ValueError("Empty upload.")
-#     except Exception as e:
-#         raise HTTPException(status_code=400, detail=f"Failed to read uploaded file: {e}")
-
-#     try:
-#         # AUDIO processing
-#         audio_result = analyze_audio(video_bytes, phoneme)
-#         audio_score = audio_result["audio_score"]
-#         audio_most_likely = audio_result.get("audio_most_likely")
-        
-#         # VIDEO processing
-#         video_score, video_most_likely = process_video(video_bytes, phoneme)
-        
-#     except FileNotFoundError as fe:
-#         raise HTTPException(status_code=422, detail=str(fe))
-#     except Exception as e:
-#         traceback.print_exc()
-#         raise HTTPException(status_code=500, detail=f"Processing failed: {e}")
-
-#     # Build response according to your rule
-#     result = {
-#         "selected_phoneme": phoneme,
-#         "audio_score": int(audio_score),
-#         "video_score": int(video_score)
-#     }
-    
-#     if audio_score < 50 and audio_most_likely:
-#         result["audio_most_likely"] = audio_most_likely
-        
-#     if video_score < 50 and video_most_likely:
-#         result["video_most_likely"] = video_most_likely
-
-#     return result
-
-
-
-
-
-
-
-
-
-
-
-
-# main.py
-import os
-import traceback
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+import torch
+import torch.nn.functional as F
+import numpy as np
+import os
+import warnings
+from sklearn.preprocessing import LabelEncoder
 
-import requests  # used only for model download
+# Suppress sklearn version warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
-app = FastAPI(title="Phonics Backend", version="2.0.0")
+from ai_models.audio_model.sound_model import PhonemeClassifier, Config
+from ai_models.audio_model.feature_extractor import WhisperFeatureExtractor,seed_everything
+from ai_models.audio_model.accuracy import grade_pronunciation_calibrated
+from ai_models.audio_model.extract import process_single_video
+from ai_models.video_model.reference_comparison import load_video_model
+from ai_models.video_model.reference_comparison import remove_audio, get_video_accuracy
 
-# CORS (currently open; restrict in production)
+# ==== Initialize FastAPI ====
+app = FastAPI()
+
+# ==== Add CORS middleware ====
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Allows all origins
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
 )
 
-# Model config
-MODEL_DIR = os.getenv("MODEL_DIR", "models")
-MODEL_FILENAME = os.getenv("MODEL_FILENAME", "best_model.pth")
-MODEL_PATH = os.path.join(MODEL_DIR, MODEL_FILENAME)
-MODEL_URL = os.getenv("MODEL_URL")  # <-- set this in Railway variables or locally for testing
+# ==== Set seeds for reproducibility ====
+import random
 
-# Placeholders to be bound at startup after model download
-analyze_audio = None
-process_video = None
 
-def download_model_if_needed():
-    """
-    Download model from MODEL_URL if not already present.
-    This is intentionally simple and prints progress. For very large models,
-    you may want to add retry/backoff logic or perform chunked verification.
-    """
-    if os.path.exists(MODEL_PATH):
-        print(f"[startup] Model already exists at {MODEL_PATH}")
-        return
+seed_everything(42)
 
-    if not MODEL_URL:
-        print("[startup] MODEL_URL not provided; skipping download (ensure model is available in container).")
-        return
+# ==== Load Feature Extractor ====
+feature_extractor = WhisperFeatureExtractor()
 
-    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-    print(f"[startup] Downloading model from {MODEL_URL} to {MODEL_PATH} ...")
+video_model_path = 'ai_models/video_model/Groups_best_model.pth'
+video_model = load_video_model(video_model_path, Config.device)
+
+
+# ==== Load Model ====
+model_path = "ai_models/audio_model/best_model.pth"
+checkpoint = torch.load(model_path, map_location=Config.device,weights_only=False)
+label_encoder: LabelEncoder = checkpoint["label_encoder"]
+
+model = PhonemeClassifier(
+    input_dim=768,
+    num_classes=len(label_encoder.classes_),
+    config=Config
+).to(Config.device)
+
+
+model.load_state_dict(checkpoint["model_state_dict"])
+model.eval()
+
+
+
+
+print(f"🚀 Model loaded with {len(label_encoder.classes_)} classes.")
+print(f"🔠 Classes: {label_encoder.classes_}")
+
+# ==== Helper prediction function ====
+def predict_single_audio(feature_tensor):
     try:
-        with requests.get(MODEL_URL, stream=True, timeout=60) as r:
-            r.raise_for_status()
-            total = r.headers.get("content-length")
-            if total is None:
-                # no content length header
-                with open(MODEL_PATH, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-            else:
-                total = int(total)
-                downloaded = 0
-                with open(MODEL_PATH, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            # simple progress print every ~5MB
-                            if downloaded % (5 * 1024 * 1024) < len(chunk):
-                                print(f"[startup] Downloaded {downloaded}/{total} bytes")
-        print("[startup] Model download completed.")
+        # Normalize features
+        feature_tensor = (feature_tensor - feature_tensor.mean(0)) / (feature_tensor.std(0) + 1e-7)
+        features = feature_tensor.unsqueeze(0).to(Config.device)
+        lengths = torch.tensor([feature_tensor.shape[0]]).to(Config.device)
+
+        with torch.no_grad():
+            logits = model(features, lengths)
+            probs = F.softmax(logits, dim=1).cpu().numpy().squeeze()
+
+        top_idx = np.argmax(probs)
+        top_label = label_encoder.inverse_transform([top_idx])[0]
+        top_prob = float(probs[top_idx])
+
+        # Console output
+        print(f"\n🎙️ Predicted phoneme: **{top_label}** with probability: {top_prob:.4f}")
+        
+
+        return top_label
+
     except Exception as e:
-        # Clean up partial download
-        if os.path.exists(MODEL_PATH):
-            try:
-                os.remove(MODEL_PATH)
-            except Exception:
-                pass
-        raise RuntimeError(f"Failed to download model from MODEL_URL: {e}") from e
+        print(f"❌ Inference failed: {e}")
+        return None
 
-@app.on_event("startup")
-def startup_event():
-    """
-    Startup event:
-    - ensure model file exists (download if MODEL_URL provided)
-    - lazy-import heavy utils and bind analyze_audio, process_video
-    """
-    # 1) Download model if MODEL_URL provided and model not present
+# ==== API Endpoint ====
+@app.post("/predict/")
+async def predict_audio(file: UploadFile = File(...), user_phenome: str=Form(...)):
     try:
-        download_model_if_needed()
+        UPLOAD_DIR = "uploaded_audios"
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+        file_path = os.path.join(UPLOAD_DIR, file.filename)
+
+        with open(file_path, "wb") as f:
+            f.write(await file.read())
+
+        print(f"✅ File saved at: {file_path}")
+
+        audio_path=process_single_video(file_path)
+       
+        # Feature extraction
+        features = feature_extractor.extract(audio_path)
+        print(f"✅ Features extracted. Shape: {features.shape}")
+
+        # Prediction
+        top_label = predict_single_audio(features)
+        print(f'top_label , {top_label}')
+
+        if top_label is None:
+            return JSONResponse(status_code=500, content={"error": "Model prediction failed."})
+
+        # Always process video and calculate scores, regardless of match
+        video_path = remove_audio(file_path)
+        print(f"Silent video saved at: {video_path}")
+
+        # Check if prediction matches user's selection
+        is_correct = (top_label.lower() == user_phenome.lower())
+        
+        # Calculate scores based on the ACTUAL detected phoneme (not user's selection)
+        # This gives us the true accuracy of what was actually pronounced
+        detected_audio_score = grade_pronunciation_calibrated(features, top_label)
+        detected_video_score_raw = get_video_accuracy(video_path, top_label, video_model)
+        detected_video_score = round(detected_video_score_raw * 100)
+        
+        # Now calculate scores for the user's intended phoneme to show how far off they were
+        intended_audio_score = grade_pronunciation_calibrated(features, user_phenome)
+        intended_video_score_raw = get_video_accuracy(video_path, user_phenome, video_model)
+        intended_video_score = round(intended_video_score_raw * 100)
+        
+        # If the prediction doesn't match user's selection, the scores should reflect the mismatch
+        if not is_correct:
+            # Use the intended phoneme scores as the main scores (these should be low for mismatches)
+            audio_score = intended_audio_score
+            video_score = intended_video_score
+            
+            # The detected phoneme becomes the "top match" since it's what was actually pronounced
+            audio_top_match = top_label
+            video_top_match = top_label
+            
+            # For mismatches, ensure scores are appropriately low
+            # If the intended scores are higher than they should be for a mismatch, penalize them
+            if intended_audio_score > 25:  # If intended score is too high for a mismatch
+                audio_score = max(0, intended_audio_score - 50)  # Heavy penalty
+            if intended_video_score > 25:  # If intended score is too high for a mismatch
+                video_score = max(0, intended_video_score - 50)  # Heavy penalty
+                
+            # Additional penalty for clear mismatches
+            if audio_score > 20:
+                audio_score = max(0, audio_score - 20)
+            if video_score > 20:
+                video_score = max(0, video_score - 20)
+        else:
+            # If prediction matches, use the detected scores (which should be the same as intended)
+            audio_score = detected_audio_score
+            video_score = detected_video_score
+            audio_top_match = None
+            video_top_match = None
+        
+        print(f"User selected phoneme: {user_phenome}")
+        print(f"Predicted phoneme: {top_label}")
+        print(f"Intended audio score: {intended_audio_score}")
+        print(f"Intended video score: {intended_video_score}")
+        print(f"Detected audio score: {detected_audio_score}")
+        print(f"Detected video score: {detected_video_score}")
+        print(f"Final audio score: {audio_score}")
+        print(f"Final video score: {video_score}")
+        print(f"Is correct: {is_correct}")
+
+        # Prepare result with complete information
+        result = {
+            "predicted_phoneme": top_label,
+            "user_phoneme": user_phenome,
+            "audio_score": audio_score,
+            "video_score": video_score,
+            "is_correct": is_correct,
+            "audio_top_match": audio_top_match,
+            "video_top_match": video_top_match,
+            "detected_phoneme": top_label
+        }
+        
+        # Add mismatch message if prediction was wrong
+        if not is_correct:
+            result["mismatch_message"] = f"You selected '{user_phenome}' but your pronunciation was more similar to '{top_label}'"
+            print(f"❌ Mismatch: Expected '{user_phenome}', got '{top_label}'")
+
+        return JSONResponse(content=result)
+
     except Exception as e:
-        # If model download fails, we still start server but log the error.
-        # You may instead want to raise here to prevent the app from starting.
-        print(f"[startup] WARNING: model download failed: {e}")
-        # Optionally, uncomment the next line to abort startup if model is required:
-        # raise
+        print(f"❌ Error: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
-    # 2) Lazy import utils after model is present (avoids importing heavy libraries too early)
-    global analyze_audio, process_video
-    try:
-        from utils.audio_utils import analyze_audio as _analyze_audio
-        from utils.video_utils import process_video as _process_video
-        analyze_audio = _analyze_audio
-        process_video = _process_video
-        print("[startup] Successfully imported utils.audio_utils and utils.video_utils")
-    except Exception as imp_err:
-        # Import failed — log traceback
-        print("[startup] Failed to import utils modules. Traceback follows:")
-        traceback.print_exc()
-        # Keep analyze_audio/process_video as None; endpoint will handle if they are not available.
-
+# ==== Health Check Endpoint ====
 @app.get("/health")
-def health():
-    return {"status": "ok"}
+async def health_check():
+    return {"status": "healthy", "message": "Backend is running"}
 
-@app.post("/grade")
-async def grade_pronunciation(
-    video: UploadFile = File(...),
-    phoneme: str = Form(...),
-):
-    """
-    Accepts:
-    - video: file (mp4/mov)
-    - phoneme: e.g., "ai", "y", "z"
-
-    Returns:
-    {
-        "selected_phoneme": "y",
-        "audio_score": 42,
-        "audio_most_likely": "z",
-        "video_score": 75
-    }
-    """
-    if not phoneme or not phoneme.strip():
-        raise HTTPException(status_code=400, detail="Missing 'phoneme'.")
-
-    # Ensure utils are available
-    if analyze_audio is None or process_video is None:
-        raise HTTPException(status_code=503, detail="Server not ready: processing utils not available. Check logs.")
-
-    # Read the uploaded file into memory
-    try:
-        video_bytes = await video.read()
-        if not video_bytes:
-            raise ValueError("Empty upload.")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to read uploaded file: {e}")
-
-    try:
-        # AUDIO processing
-        audio_result = analyze_audio(video_bytes, phoneme)
-        audio_score = audio_result.get("audio_score", 0)
-        audio_most_likely = audio_result.get("audio_most_likely")
-
-        # VIDEO processing
-        video_score, video_most_likely = process_video(video_bytes, phoneme)
-
-    except FileNotFoundError as fe:
-        raise HTTPException(status_code=422, detail=str(fe))
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Processing failed: {e}")
-
-    # Build response according to your rule
-    result = {
-        "selected_phoneme": phoneme,
-        "audio_score": int(audio_score),
-        "video_score": int(video_score)
-    }
-
-    if audio_score < 50 and audio_most_likely:
-        result["audio_most_likely"] = audio_most_likely
-
-    if video_score < 50 and video_most_likely:
-        result["video_most_likely"] = video_most_likely
-
-    return result
+# ==== Run the app ====
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

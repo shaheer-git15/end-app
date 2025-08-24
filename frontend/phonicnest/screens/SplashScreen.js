@@ -139,8 +139,8 @@ const SplashScreen = ({ navigation }) => {
           },
         ]}
       >
-        <Text style={styles.appLogoText}>PhonicNest</Text>
-        <Text style={styles.byText}>by Murrabi</Text>
+        <Text style={styles.appLogoText}>Jholly Phonics</Text>
+        <Text style={styles.byText}>by Murabbi</Text>
       </Animated.View>
     </View>
   );

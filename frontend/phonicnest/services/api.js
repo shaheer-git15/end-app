@@ -7,12 +7,18 @@ const API_TIMEOUT = currentConfig.TIMEOUT;
 // API Endpoints
 const ENDPOINTS = {
   HEALTH: '/health',
-  GRADE: '/grade',
+  GRADE: '/predict/',
 };
 
 class ApiService {
   constructor() {
     this.baseURL = API_BASE_URL;
+    try {
+      // Helpful diagnostics in Expo/Metro console
+      // Shows which URL the app is actually using
+      // eslint-disable-next-line no-console
+      console.log('[API] Base URL:', this.baseURL);
+    } catch (_) {}
   }
 
   // Helper method to create headers
@@ -35,7 +41,9 @@ class ApiService {
   // Health check endpoint
   async healthCheck() {
     try {
-      const response = await fetch(`${this.baseURL}${ENDPOINTS.HEALTH}`, {
+      const url = `${this.baseURL}${ENDPOINTS.HEALTH}`;
+      console.log('[API] GET', url);
+      const response = await fetch(url, {
         method: 'GET',
         headers: this.getHeaders(),
       });
@@ -61,18 +69,17 @@ class ApiService {
         name: videoFile.name || 'video.mp4',
       };
       
-      formData.append('video', fileToUpload);
-      formData.append('phoneme', phoneme);
+      formData.append('file', fileToUpload);
+      formData.append('user_phenome', phoneme);
 
-      console.log('FormData created, sending request to:', `${this.baseURL}${ENDPOINTS.GRADE}`);
+      const url = `${this.baseURL}${ENDPOINTS.GRADE}`;
+      console.log('FormData created, sending request to:', url);
 
-      const response = await fetch(`${this.baseURL}${ENDPOINTS.GRADE}`, {
+      const response = await fetch(url, {
         method: 'POST',
         body: formData,
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'multipart/form-data',
-        },
+        // IMPORTANT: do not set Content-Type for RN FormData; boundary is auto-set
+        headers: { 'Accept': 'application/json' },
       });
 
       console.log('Response status:', response.status);

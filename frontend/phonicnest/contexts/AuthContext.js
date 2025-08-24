@@ -55,6 +55,12 @@ export const AuthProvider = ({ children }) => {
   const signUp = async (email, displayName = '') => {
     try {
       setError(null);
+      const existing = await userService.getUser(email);
+      if (existing) {
+        const err = new Error('Email already registered. Please log in.');
+        setError(err);
+        throw err;
+      }
       const result = await userService.createUser(email, displayName);
       const userData = result.user;
       setUser(userData);
@@ -69,10 +75,15 @@ export const AuthProvider = ({ children }) => {
   const signIn = async (email) => {
     try {
       setError(null);
-      const userData = await userService.ensureUser(email);
-      setUser(userData);
-      await saveUserToStorage(userData);
-      return { success: true, user: userData };
+      const existing = await userService.getUser(email);
+      if (!existing) {
+        const err = new Error('User not registered. Please sign up first.');
+        setError(err);
+        throw err;
+      }
+      setUser(existing);
+      await saveUserToStorage(existing);
+      return { success: true, user: existing };
     } catch (error) {
       setError(error);
       throw error;

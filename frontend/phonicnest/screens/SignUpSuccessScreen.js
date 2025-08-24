@@ -12,9 +12,9 @@ const { width, height } = Dimensions.get('window');
 
 const SignUpSuccessScreen = ({ navigation }) => {
   useEffect(() => {
-    // Navigate to StudentDashboard after 3 seconds
+    // Navigate to Roles screen after 3 seconds
     const timer = setTimeout(() => {
-      navigation.navigate('StudentDashboard');
+      navigation.navigate('Roles');
     }, 3000);
 
     return () => clearTimeout(timer);

@@ -206,3 +206,8 @@ config_local.py
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+
+ai_models.zip
+*.pt
+*.pth

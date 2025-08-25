@@ -1,17 +1,27 @@
-# Use stable Python version that works with torch/transformers
+# Use Python 3.10 (compatible with your libs)
 FROM python:3.10-slim
 
-# Set working directory
+# Set workdir
 WORKDIR /app
 
-# Copy all backend files into container
-COPY . /app
+# Install system dependencies (for librosa, opencv, mediapipe, etc.)
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsndfile1 \
+    libgl1 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
+# Copy requirements first for caching
+COPY requirements.txt .
+
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose Render port
-EXPOSE 10000
+# Copy the app
+COPY . .
 
-# Start FastAPI with uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000"]
+# Expose port
+EXPOSE 8000
+
+# Start the app (Render overrides this with your Start Command anyway)
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -13,5 +13,5 @@ node_modules/
 *.pt
 *.pth
 
-# Ignore frontend
-frontend/
+# Ignore frontend completely
+../frontend/

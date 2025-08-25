@@ -1,27 +1,30 @@
-# Use Python 3.10 (compatible with your libs)
+# Use Python 3.10 slim (Render requires <3.11 and torch works fine on 3.10)
 FROM python:3.10-slim
 
-# Set workdir
+# Prevent Python from writing pyc files and buffer logs
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Set work directory
 WORKDIR /app
 
-# Install system dependencies (for librosa, opencv, mediapipe, etc.)
+# Install system dependencies required by some packages (ffmpeg, opencv, etc.)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
-    libsndfile1 \
-    libgl1 \
+    libsm6 \
+    libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for caching
-COPY requirements.txt .
-
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt .
+RUN pip install --upgrade pip
+RUN pip install -r requirements.txt
 
-# Copy the app
+# Copy project files
 COPY . .
 
-# Expose port
-EXPOSE 8000
+# Expose port (Render uses 10000 by default)
+EXPOSE 10000
 
-# Start the app (Render overrides this with your Start Command anyway)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Command to run app with Uvicorn
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000"]

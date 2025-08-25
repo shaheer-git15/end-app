@@ -243,7 +243,8 @@ import torch.nn.functional as F
 import numpy as np
 import os
 import warnings
-import requests, zipfile, io, pathlib
+import gdown
+import zipfile
 from sklearn.preprocessing import LabelEncoder
 
 # Suppress sklearn version warnings
@@ -252,30 +253,28 @@ warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 # ==== Download + Extract Models (if not already present) ====
 GDRIVE_FILE_ID = "1vQiJlSlusEVNkk6Y466m12_xsZDH7vfr"
 MODEL_DIR = "ai_models"
+ZIP_PATH = "models.zip"
 
 def download_and_extract_models():
     if not os.path.exists(MODEL_DIR):
         print("📥 Downloading models from Google Drive...")
-        url = f"https://drive.google.com/uc?export=download&id={GDRIVE_FILE_ID}"
-        response = requests.get(url)
-        if response.status_code != 200:
-            raise RuntimeError("❌ Failed to download models from Google Drive")
+        url = f"https://drive.google.com/uc?id={GDRIVE_FILE_ID}"
+        gdown.download(url, ZIP_PATH, quiet=False, fuzzy=True)
 
         os.makedirs(MODEL_DIR, exist_ok=True)
-        with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+        with zipfile.ZipFile(ZIP_PATH, "r") as z:
             z.extractall(MODEL_DIR)
 
         print("✅ Models downloaded and extracted successfully.")
 
 download_and_extract_models()
 
-# ==== Imports after models are available ====
+# ==== Imports AFTER models exist ====
 from ai_models.audio_model.sound_model import PhonemeClassifier, Config
 from ai_models.audio_model.feature_extractor import WhisperFeatureExtractor, seed_everything
 from ai_models.audio_model.accuracy import grade_pronunciation_calibrated
 from ai_models.audio_model.extract import process_single_video
-from ai_models.video_model.reference_comparison import load_video_model
-from ai_models.video_model.reference_comparison import remove_audio, get_video_accuracy
+from ai_models.video_model.reference_comparison import load_video_model, remove_audio, get_video_accuracy
 
 # ==== Initialize FastAPI ====
 app = FastAPI()
@@ -318,6 +317,7 @@ print(f"🔠 Classes: {label_encoder.classes_}")
 # ==== Helper prediction function ====
 def predict_single_audio(feature_tensor):
     try:
+        # Normalize features
         feature_tensor = (feature_tensor - feature_tensor.mean(0)) / (feature_tensor.std(0) + 1e-7)
         features = feature_tensor.unsqueeze(0).to(Config.device)
         lengths = torch.tensor([feature_tensor.shape[0]]).to(Config.device)
@@ -352,22 +352,29 @@ async def predict_audio(file: UploadFile = File(...), user_phenome: str = Form(.
 
         audio_path = process_single_video(file_path)
 
+        # Feature extraction
         features = feature_extractor.extract(audio_path)
         print(f"✅ Features extracted. Shape: {features.shape}")
 
+        # Prediction
         top_label = predict_single_audio(features)
+        print(f"top_label , {top_label}")
+
         if top_label is None:
             return JSONResponse(status_code=500, content={"error": "Model prediction failed."})
 
         video_path = remove_audio(file_path)
         print(f"Silent video saved at: {video_path}")
 
+        # Check if prediction matches user's selection
         is_correct = (top_label.lower() == user_phenome.lower())
 
+        # Detected scores
         detected_audio_score = grade_pronunciation_calibrated(features, top_label)
         detected_video_score_raw = get_video_accuracy(video_path, top_label, video_model)
         detected_video_score = round(detected_video_score_raw * 100)
 
+        # Intended scores
         intended_audio_score = grade_pronunciation_calibrated(features, user_phenome)
         intended_video_score_raw = get_video_accuracy(video_path, user_phenome, video_model)
         intended_video_score = round(intended_video_score_raw * 100)
@@ -422,4 +429,5 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
 

@@ -42,7 +42,13 @@ def download_and_extract_models():
         headers["Accept"] = "application/octet-stream"
 
     try:
-        resp = requests.get(MODEL_URL, headers=headers, stream=True, timeout=60)
+        resp = requests.get(
+            MODEL_URL,
+            headers=headers,
+            stream=True,
+            timeout=120,
+            allow_redirects=True,
+        )
     except Exception as e:
         raise RuntimeError(f"Failed to request model URL: {e}")
 
@@ -58,7 +64,16 @@ def download_and_extract_models():
         )
 
     if resp.status_code != 200:
-        raise RuntimeError(f"Download failed with status code {resp.status_code}")
+        response_text = ""
+        try:
+            response_text = resp.text[:300].replace("\n", " ")
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"Download failed with status code {resp.status_code}. "
+            f"Content-Type: {content_type}. "
+            f"Response snippet: {response_text}"
+        )
 
     # Save streamed content to disk
     with open(ZIP_PATH, "wb") as f:

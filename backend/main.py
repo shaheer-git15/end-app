@@ -136,24 +136,37 @@ app.add_middleware(
 import random
 seed_everything(42)
 
-# ==== Load Feature Extractor ====
-feature_extractor = WhisperFeatureExtractor()
-video_model_path = 'ai_models/video_model/Groups_best_model.pth'
-video_model = load_video_model(video_model_path, Config.device)
+# ==== Lazy Load Models ====
+feature_extractor = None
+video_model = None
+model = None
+label_encoder = None
 
-# ==== Load Model ====
-model_path = "ai_models/audio_model/best_model.pth"
-checkpoint = torch.load(model_path, map_location=Config.device, weights_only=False)
-label_encoder: LabelEncoder = checkpoint["label_encoder"]
-model = PhonemeClassifier(
-    input_dim=768,
-    num_classes=len(label_encoder.classes_),
-    config=Config
-).to(Config.device)
-model.load_state_dict(checkpoint["model_state_dict"])
-model.eval()
-print(f"🚀 Model loaded with {len(label_encoder.classes_)} classes.")
-print(f"🔠 Classes: {label_encoder.classes_}")
+def load_models_if_needed():
+    global feature_extractor, video_model, model, label_encoder
+    if feature_extractor is None:
+        print("Loading Whisper Feature Extractor...")
+        feature_extractor = WhisperFeatureExtractor()
+        
+    if video_model is None:
+        print("Loading Video Model...")
+        video_model_path = 'ai_models/video_model/Groups_best_model.pth'
+        video_model = load_video_model(video_model_path, Config.device)
+
+    if model is None:
+        print("Loading Audio Model...")
+        model_path = "ai_models/audio_model/best_model.pth"
+        checkpoint = torch.load(model_path, map_location=Config.device, weights_only=False)
+        label_encoder = checkpoint["label_encoder"]
+        model = PhonemeClassifier(
+            input_dim=768,
+            num_classes=len(label_encoder.classes_),
+            config=Config
+        ).to(Config.device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model.eval()
+        print(f"🚀 Model loaded with {len(label_encoder.classes_)} classes.")
+        print(f"🔠 Classes: {label_encoder.classes_}")
 
 # ==== Helper prediction function ====
 def predict_single_audio(feature_tensor):
@@ -178,6 +191,7 @@ def predict_single_audio(feature_tensor):
 # ==== API Endpoint ====
 @app.post("/predict/")
 async def predict_audio(file: UploadFile = File(...), user_phenome: str = Form(...)):
+    load_models_if_needed()
     try:
         UPLOAD_DIR = "uploaded_audios"
         os.makedirs(UPLOAD_DIR, exist_ok=True)

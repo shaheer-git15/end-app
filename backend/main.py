@@ -16,7 +16,7 @@ import requests
 import zipfile
 
 # ---------- CONFIG ----------
-MODEL_URL = os.getenv("MODEL_URL")
+GITHUB_ASSET_API_URL = os.getenv("GITHUB_ASSET_API_URL")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 ZIP_PATH = "models.zip"
 MODEL_DIR = "ai_models"
@@ -31,19 +31,22 @@ def download_and_extract_models():
         print("Models folder already exists, skipping download.")
         return
 
-    if not MODEL_URL:
-        raise ValueError("MODEL_URL environment variable is not set. Cannot download models.")
+    if not GITHUB_ASSET_API_URL:
+        raise ValueError("GITHUB_ASSET_API_URL environment variable is not set. Cannot download models.")
+    if not GITHUB_TOKEN:
+        raise ValueError("GITHUB_TOKEN environment variable is not set. Cannot download models.")
 
     print("📥 Downloading models from GitHub Releases...")
     
-    headers = {}
-    if GITHUB_TOKEN:
-        headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
-        headers["Accept"] = "application/octet-stream"
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/octet-stream",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
 
     try:
         resp = requests.get(
-            MODEL_URL,
+            GITHUB_ASSET_API_URL,
             headers=headers,
             stream=True,
             timeout=120,
@@ -278,7 +281,7 @@ async def health_check():
 # ==== Run the app ====
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
 
 
 
